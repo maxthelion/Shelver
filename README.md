@@ -1,43 +1,53 @@
 # Shelver
 
-Upload a photograph of a bookshelf, identify visible books with a selectable vision model, resolve metadata/ratings through Google Books, and highlight the original pixels with SVG overlays.
+Experimental web app for identifying books in shelf photographs and benchmarking vision models.
 
-## Architecture
+## Grading harness
 
-- React + Vite frontend
-- Cloudflare Worker API
-- OpenAI Responses API for whole-image vision (no automatic shelf cropping)
-- Structured JSON output including normalized bounding boxes
-- Google Books for cheap canonical metadata and ratings
-- SVG overlay over the untouched uploaded image; no generative image editing
+Upload one image and run it repeatedly with different models. Every result is retained in browser memory. Seed ground truth from the best run, correct titles/authors once, add missed books, and compare all runs.
 
-## Local setup
+Metrics: precision, recall, F1, fuzzy title accuracy, fuzzy author accuracy, bounding-box IoU where ground-truth boxes exist, false positives, misses, latency and API token use.
 
-```bash
+The grader deliberately keeps recognition and grading separate. A model's own confidence is not used to decide whether it is correct.
+
+## Models
+
+The model allow-list is in both `src/App.tsx` and `worker/index.ts`. Keep them synchronized. The harness is intended for experimentation; remove models your API project cannot access.
+
+## Setup
+
+```sh
 npm install
 cp .dev.vars.example .dev.vars
+# add OPENAI_API_KEY
 npm run dev
 ```
 
-Set `OPENAI_API_KEY` in `.dev.vars`.
+For Cloudflare, store the key as a Worker secret:
 
-## Deploy to Cloudflare
-
-```bash
+```sh
 npx wrangler secret put OPENAI_API_KEY
+```
+
+Then deploy with:
+
+```sh
 npm run deploy
 ```
 
-Or connect this GitHub repository to Cloudflare Workers Builds. Build command: `npm run build`; deploy command: `npx wrangler deploy`.
+The API key is read only by the Worker and is never sent to the browser.
 
-## Model grading
+## Current recognition strategy
 
-The UI exposes the vision model. Run the same image through different models and compare title recall, title accuracy, localization and cost/usage. The model allow-list is deliberately server-side in `worker/index.ts`; add/remove models there and in `src/App.tsx` as desired.
+The original whole image is sent to the selected vision model. No automatic shelf cropping is performed. The model returns structured title, author, confidence and normalized bounding-box data. Bibliographic enrichment is performed separately.
 
-## Next steps
+## Grading workflow
 
-1. Persist analyses and manual corrections in D1.
-2. Store original images in private R2 for repeatable grading runs.
-3. Add side-by-side model runs and a ground-truth correction mode.
-4. Add a second whole-image verification pass and only then optional model-requested zooms.
-5. Add additional rating providers behind a provider interface.
+1. Upload one representative shelf image.
+2. Run several models against exactly the same upload.
+3. Choose the most complete run and **Seed ground truth**.
+4. Correct its title/author fields, remove hallucinations and add missed books.
+5. The leaderboard recomputes automatically.
+6. Prefer F1/recall for catalogue completeness, then inspect title accuracy, latency and token usage to choose the cheapest acceptable model.
+
+Ground truth is intentionally user-edited rather than model-generated truth. For a persistent benchmark suite, the next step is storing experiments in D1/R2.
