@@ -1,12 +1,12 @@
 # Shelver
 
-Upload a photograph of a bookshelf, identify visible books with a selectable vision model, resolve metadata/ratings through Google Books, and highlight the original pixels with SVG overlays.
+Upload a photograph of a bookshelf, identify visible books with GPT-5.6 Terra, resolve metadata/ratings through Google Books, and highlight the original pixels with SVG overlays.
 
 ## Architecture
 
 - React + Vite frontend
 - Cloudflare Worker API
-- OpenAI Responses API for whole-image vision (no automatic shelf cropping)
+- Two-pass OpenAI Responses API vision: a full shelf catalogue, then a Terra recall audit for missed spines
 - Structured JSON output including normalized bounding boxes
 - Google Books for cheap canonical metadata and ratings
 - SVG overlay over the untouched uploaded image; no generative image editing
@@ -30,9 +30,9 @@ npm run deploy
 
 Or connect this GitHub repository to Cloudflare Workers Builds. Build command: `npm run build`; deploy command: `npx wrangler deploy`.
 
-## Model grading
+## Analysis approach
 
-The UI exposes the vision model. Run the same image through different models and compare title recall, title accuracy, localization and cost/usage. The model allow-list is deliberately server-side in `worker/index.ts`; add/remove models there and in `src/App.tsx` as desired.
+Shelver uses GPT-5.6 Terra twice on the same full-resolution image. The first pass catalogues the shelf. The second pass receives the first-pass records and returns only missing books; overlapping boxes are removed before metadata enrichment. This increases recall, but also roughly doubles vision-model latency and cost.
 
 ## Next steps
 
