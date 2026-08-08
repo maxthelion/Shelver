@@ -10,6 +10,7 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
   const books = useMemo(
     () => [...(result?.books || [])].sort((a, b) => (b.rating || 0) - (a.rating || 0)),
     [result],
@@ -19,6 +20,7 @@ export default function App() {
     if (!file) return;
     setBusy(true);
     setError('');
+    setCopied(false);
     try {
       const fd = new FormData();
       fd.append('image', file);
@@ -38,7 +40,15 @@ export default function App() {
     setFile(nextFile);
     setResult(null);
     setSelected(null);
+    setCopied(false);
     if (nextFile) setImage(URL.createObjectURL(nextFile));
+  }
+
+  const debugReport = useMemo(() => result?.debug ? JSON.stringify(result.debug, null, 2) : '', [result]);
+
+  async function copyDebug() {
+    await navigator.clipboard.writeText(debugReport);
+    setCopied(true);
   }
 
   return <main>
@@ -63,7 +73,7 @@ export default function App() {
               y={book.box.y * 1000}
               width={book.box.width * 1000}
               height={book.box.height * 1000}
-              className={selected === book.id ? 'active' : ''}
+              className={[selected === book.id ? 'active' : '', book.pass === 2 ? 'review' : ''].filter(Boolean).join(' ')}
               onClick={() => setSelected(book.id)}
             />)}
           </svg>
@@ -73,7 +83,7 @@ export default function App() {
       </div>
       <aside>
         <div className="summary">
-          <b>{books.length}</b> books {result && <span>via {result.model} · {result.passes} passes</span>}
+          <b>{books.length}</b> books {result && <span>via {result.model} · {result.passes} passes · {result.debug?.recallAudit.added.length || 0} recall additions</span>}
         </div>
         {error && <p className="error">{error}</p>}
         <ol>{books.map((book: Book, index) => <li
@@ -82,10 +92,16 @@ export default function App() {
           onClick={() => setSelected(book.id)}
         >
           <span className="rank">{index + 1}</span>
-          <span><b>{book.title}</b><small>{book.author} · {Math.round(book.confidence * 100)}% match</small></span>
+          <span><b>{book.title}</b><small>{book.author} · {Math.round(book.confidence * 100)}% match {book.pass === 2 && <em className="audit-label">Added in recall audit</em>}</small></span>
           <span className="rating">{book.rating ? `★ ${book.rating.toFixed(2)}` : '—'}</span>
         </li>)}</ol>
       </aside>
     </section>
+    {result?.debug && <details className="debug">
+      <summary>Verbose debug report</summary>
+      <p>This includes both raw catalogues, additions, overlap suppressions, prompts, image metadata, and per-pass token usage. It does not include the image itself or your API key.</p>
+      <button onClick={copyDebug}>{copied ? 'Copied' : 'Copy debug report'}</button>
+      <textarea readOnly value={debugReport} aria-label="Verbose debug report" />
+    </details>}
   </main>;
 }

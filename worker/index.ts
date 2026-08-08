@@ -17,6 +17,7 @@ const schema = {
 };
 
 const firstPassPrompt = `Catalogue every distinct visible physical book in this shelf photograph. Read the whole original image; do not invent unreadable titles. Return one record per physical spine/copy. box is normalized to the ORIGINAL image: x,y are top-left and width,height are fractions 0..1. Make boxes tightly enclose the corresponding spine. confidence is confidence that title+author are correct, 0..1.`;
+const recallAuditPrompt = 'Audit this bookshelf photograph for missed books. A first pass found the records supplied below. Inspect every shelf, gap, partial spine, and angled book in the ORIGINAL image. Return only distinct physical books absent from the first-pass records; never repeat an existing spine. Use the same normalized bounding-box rules. If there are no missing books, return an empty books array.';
 
 function outputText(raw: any): string {
   const text = raw.output?.flatMap((item: any) => item.content || []).find((item: any) => item.type === 'output_text')?.text;
@@ -68,11 +69,21 @@ export default {
       const data = `data:${image.type || 'image/jpeg'};base64,${btoa(binary)}`;
 
       const first = await catalogue(data, firstPassPrompt, env.OPENAI_API_KEY);
-      const reviewPrompt = `Audit this bookshelf photograph for missed books. A first pass found the records below. Inspect every shelf, gap, partial spine, and angled book in the ORIGINAL image. Return only distinct physical books absent from the first-pass records; never repeat an existing spine. Use the same normalized bounding-box rules. If there are no missing books, return an empty books array.\n\nFirst-pass records:\n${JSON.stringify(first.books)}`;
+      const reviewPrompt = `${recallAuditPrompt}\n\nFirst-pass records:\n${JSON.stringify(first.books)}`;
       const second = await catalogue(data, reviewPrompt, env.OPENAI_API_KEY);
-      const books = [...first.books];
+      const books: Array<DetectedBook & { pass: 1 | 2 }> = first.books.map(book => ({ ...book, pass: 1 as const }));
+      const added: DetectedBook[] = [];
+      const suppressedAsOverlaps: Array<{ candidate: DetectedBook; overlaps: Array<{ id: string; title: string; author: string; iou: number }> }> = [];
       for (const candidate of second.books) {
-        if (!books.some(existing => iou(candidate.box, existing.box) >= 0.5)) books.push(candidate);
+        const overlaps = books.filter(existing => iou(candidate.box, existing.box) >= 0.5).map(existing => ({
+          id: existing.id, title: existing.title, author: existing.author, iou: Number(iou(candidate.box, existing.box).toFixed(3)),
+        }));
+        if (overlaps.length) suppressedAsOverlaps.push({ candidate, overlaps });
+        else {
+          const auditedBook = { ...candidate, pass: 2 as const };
+          books.push(auditedBook);
+          added.push(auditedBook);
+        }
       }
       const enriched = await Promise.all(books.map(async book => {
         try {
@@ -83,6 +94,12 @@ export default {
       return Response.json({
         model: MODEL, passes: 2, books: enriched,
         usage: { input_tokens: (first.usage?.input_tokens || 0) + (second.usage?.input_tokens || 0), output_tokens: (first.usage?.output_tokens || 0) + (second.usage?.output_tokens || 0) },
+        debug: {
+          image: { name: image.name, mimeType: image.type, sizeBytes: image.size },
+          prompts: { firstPass: firstPassPrompt, recallAudit: recallAuditPrompt },
+          firstPass: { bookCount: first.books.length, usage: first.usage, books: first.books },
+          recallAudit: { modelReportedCount: second.books.length, usage: second.usage, added, suppressedAsOverlaps },
+        },
       });
     } catch (reason) {
       return Response.json({ error: reason instanceof Error ? reason.message : String(reason) }, { status: 500 });
